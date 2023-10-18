@@ -20,27 +20,14 @@ import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.PriorityQueue;
 
-/**
- * Saves state (two files) when closed in <code>config.basePath()</code><br> directory.
- *
- * <p>State contains two files:
- * <li>
- * <tt>db</tt> with sorted by key entries
- * </li>
- * <li>
- * <tt>offsets</tt> with keys offsets at <tt>db</tt>(in bytes)
- * </li>
- *
- * <p>This allows use binary search after <tt>db</tt> reading
- */
 public abstract class AbstractBasedOnSSTableDao<D, E extends Entry<D>> extends AbstractInMemoryDao<D, E> {
     //  ===================================
     //  Constants
     //  ===================================
     private static final ValueLayout.OfLong LONG_LAYOUT = ValueLayout.JAVA_LONG_UNALIGNED;
-    private static final String DB_FILENAME_PREFIX = "db_";
     private static final String OFFSETS_FILENAME_PREFIX = "offsets_";
     private static final String METADATA_FILENAME = "metadata";
+    private static final String DB_FILENAME_PREFIX = "db_";
     private static final int SIZE_LENGTH = Long.BYTES;
     private static final long VALUE_IS_NULL_SIZE = -1;
 
@@ -69,7 +56,10 @@ public abstract class AbstractBasedOnSSTableDao<D, E extends Entry<D>> extends A
         super(comparator);
         this.serializer = serializer;
         this.basePath = Objects.requireNonNull(config.basePath());
-        Files.createDirectories(basePath);
+
+        if (!Files.exists(basePath)) {
+            Files.createDirectory(basePath);
+        }
         this.metadataPath = basePath.resolve(METADATA_FILENAME);
 
         this.storagesCount = getCountFromMetadataOrCreate();
@@ -108,7 +98,6 @@ public abstract class AbstractBasedOnSSTableDao<D, E extends Entry<D>> extends A
     //  ===================================
     @Override
     public Iterator<E> get(D from, D to) {
-
         Iterator<E> inMemotyIterator = super.get(from, to);
         List<StorageIterator> storageIterators = new ArrayList<>(storagesCount);
         for (int i = 0; i < storagesCount; i++) {
@@ -132,14 +121,14 @@ public abstract class AbstractBasedOnSSTableDao<D, E extends Entry<D>> extends A
             MemorySegment storage = dbMappedSegments[i];
             MemorySegment offsets = offsetMappedSegments[i];
 
-            long upperBoundOffset = findLowerBoundOffset(key, storage, offsets);
-            if (upperBoundOffset == -1) {
+            long lowerBoundOffset = findLowerBoundOffset(key, storage, offsets);
+            if (lowerBoundOffset == -1) {
                 continue;
             }
-            D upperBoundKey = readValue(storage, upperBoundOffset);
-            if (comparator.compare(upperBoundKey, key) == 0) {
-                D value = readValue(storage, upperBoundOffset + SIZE_LENGTH + serializer.size(upperBoundKey));
-                return serializer.createEntry(upperBoundKey, value);
+            D lowerBoundKey = readValue(storage, lowerBoundOffset);
+            if (comparator.compare(lowerBoundKey, key) == 0) {
+                D value = readValue(storage, lowerBoundOffset + SIZE_LENGTH + serializer.size(lowerBoundKey));
+                return serializer.createEntry(lowerBoundKey, value);
             }
         }
         return null;
